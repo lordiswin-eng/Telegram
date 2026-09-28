@@ -7,26 +7,13 @@ TOKEN = "8757949960:AAHGclRKNpJvhplMWwrZg_r1PVJCEDuuyPs"
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-def get_formatted_ticker(symbol: str) -> str:
-    symbol = symbol.upper().strip()
-    
-    if symbol.endswith(".IS") or symbol.endswith("-USD"):
-        return symbol
-        
-    cryptos = ["BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "DOGE", "DOT", "LINK", "LTC", "SHIB", "PEPE"]
-    if symbol in cryptos:
-        return f"{symbol}-USD"
-    
-    # BİST Hisseleri içinVarsayılan .IS takısı
-    return f"{symbol}.IS"
-
 def get_crypto_binance(symbol: str):
-    """Kripto paralar için Binance API üzerinden doğrudan veri çeker."""
+    """Binance API - Kriptolar için 0 engel, API Key gerektirmez."""
     try:
-        clean_symbol = symbol.replace("-USD", "").replace(".IS", "")
+        clean_symbol = symbol.upper().replace("-USD", "").replace(".IS", "").strip()
         url = f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}USDT&interval=1d&limit=3"
-        response = requests.get(url, timeout=10)
-        data = response.json()
+        res = requests.get(url, timeout=5)
+        data = res.json()
         
         if isinstance(data, list) and len(data) >= 2:
             prev_day = data[-2]
@@ -36,48 +23,49 @@ def get_crypto_binance(symbol: str):
             last_price = float(data[-1][4])
             return high, low, close, last_price
     except Exception as e:
-        logging.error(f"Binance API Hata: {e}")
+        logging.error(f"Binance Hata: {e}")
     return None
 
-def get_stock_yahoo(symbol: str):
-    """BİST ve NASDAQ için Yahoo Finance API üzerinden veri çeker."""
+def get_stock_stooq(symbol: str):
+    """Stooq Financial API - BİST ve NASDAQ için API Key gerektirmez."""
     try:
+        clean_symbol = symbol.upper().replace(".IS", "").replace("-USD", "").strip()
+        
+        # BİST için varsayılan '.TR' uzantısı kullanılır
+        formatted = f"{clean_symbol}.TR"
+        
+        url = f"https://stooq.com/q/l/?s={formatted}&f=sdohcv&h&e=csv"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
+        res = requests.get(url, headers=headers, timeout=5)
         
-        result = data['chart']['result'][0]
-        quote = result['indicators']['quote'][0]
-        
-        highs = [h for h in quote['high'] if h is not None]
-        lows = [l for l in quote['low'] if l is not None]
-        closes = [c for c in quote['close'] if c is not None]
-        
-        if len(closes) >= 2:
-            high = highs[-2]
-            low = lows[-2]
-            close = closes[-2]
-            last_price = closes[-1]
-            return high, low, close, last_price
+        lines = res.text.strip().split('\n')
+        if len(lines) >= 2:
+            row = lines[1].split(',')
+            if len(row) >= 6 and row[1] != 'N/A':
+                open_p = float(row[2])
+                high = float(row[3])
+                low = float(row[4])
+                close = float(row[5])
+                last_price = close
+                return high, low, close, last_price
     except Exception as e:
-        logging.error(f"Yahoo API Hata: {e}")
+        logging.error(f"Stooq Hata: {e}")
     return None
 
-def calculate_pivot_levels(ticker_symbol: str):
-    formatted_ticker = get_formatted_ticker(ticker_symbol)
-    data = None
+def calculate_pivot_levels(symbol: str):
+    symbol_upper = symbol.upper().strip()
     
-    # Eğer kripto ise öncelikle Binance API dene
-    if "-USD" in formatted_ticker:
-        data = get_crypto_binance(formatted_ticker)
-        
-    # Kripto değilse veya Binance başarısızsa Yahoo API dene
+    # 1. Kripto Dene (Binance)
+    data = get_crypto_binance(symbol_upper)
+    ticker_name = symbol_upper if symbol_upper.endswith("-USD") else f"{symbol_upper}-USD"
+    
+    # 2. Hisse Dene (Stooq)
     if not data:
-        data = get_stock_yahoo(formatted_ticker)
+        data = get_stock_stooq(symbol_upper)
+        ticker_name = f"{symbol_upper}.IS"
         
     if not data:
-        return f"❌ *{formatted_ticker}* sembolü bulunamadı veya veri alınamadı.\n💡 *Örnekler:* `ASELS`, `THYAO`, `BTC`, `AAPL`"
+        return f"❌ *{symbol_upper}* sembolü bulunamadı.\n💡 *Örnek Kullanım:* `THYAO`, `ASELS`, `ASTOR` veya `BTC`"
         
     high, low, close, last_price = data
     
@@ -89,7 +77,7 @@ def calculate_pivot_levels(ticker_symbol: str):
     s2 = pivot - (high - low)
     
     return (
-        f"📊 *{formatted_ticker} Teknik Analiz*\n"
+        f"📊 *{ticker_name} Teknik Analiz*\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"💵 *Son Fiyat:* `{last_price:.2f}`\n\n"
         f"🔴 *Direnç 2 (R2):* `{r2:.2f}`\n"
@@ -97,18 +85,15 @@ def calculate_pivot_levels(ticker_symbol: str):
         f"🎯 *Pivot Noktası:* `{pivot:.2f}`\n"
         f"🟢 *Destek 1 (S1):* `{s1:.2f}`\n"
         f"🟢 *Destek 2 (S2):* `{s2:.2f}`\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"💡 *Kullanım:* BİST için `ASELS`, NASDAQ için `AAPL`, Kripto için `BTC` yazabilirsiniz."
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 *Borsa & Kripto Destek/Direnç Botuna Hoş Geldiniz!*\n\n"
-        "Analiz etmek istediğiniz sembolü yazıp gönderebilirsiniz.\n\n"
+        "Analiz etmek istediğiniz sembolü mesaj olarak yazın.\n\n"
         "Örnekler:\n"
         "• BİST: `ASELS`, `ASTOR`, `THYAO`\n"
-        "• Kripto: `BTC`, `ETH`, `SOL`\n"
-        "• NASDAQ: `AAPL`, `TSLA`",
+        "• Kripto: `BTC`, `ETH`, `SOL`",
         parse_mode="Markdown"
     )
 
@@ -123,4 +108,4 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling(drop_pending_updates=True)
-    
+                
