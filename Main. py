@@ -1,0 +1,101 @@
+import logging
+import yfinance as yf
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+# Telegram Bot Token'ınızı buraya yapıştırın (8757949960:AAHGclRKNpJvhplMWwrZg_r1PVJCEDuuyPs)
+BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+def get_formatted_ticker(symbol: str) -> str:
+    """Gelen sembolü borsaya göre formatlar."""
+    symbol = symbol.upper().strip()
+    
+    # Kripto kontrolü (Örn: BTC -> BTC-USD)
+    if symbol in ["BTC", "ETH", "SOL", "XRP", "ADA", "AVAX", "DOGE"]:
+        return f"{symbol}-USD"
+    
+    # BİST / NASDAQ ayrımı:
+    # BİST hisselerinin sonuna .IS eklenir (THYAO.IS, GARAN.IS vb.)
+    # ABD borsaları doğrudan sembol ismiyle çalışır (AAPL, NVDA, TSLA)
+    if not symbol.endswith(".IS") and not symbol.endswith("-USD"):
+        # BİST varsayımı: Kullanıcı .IS yazmadıysa otomatik ekler
+        if len(symbol) <= 5 and symbol.isalpha():
+            # Eğer NASDAQ hissesi değilse BİST'e tamamla
+            # (İsteğe göre varsayılan BİST veya NASDAQ yapılabilir)
+            return f"{symbol}.IS"
+    
+    return symbol
+
+def calculate_pivot_levels(ticker_symbol: str):
+    formatted_ticker = get_formatted_ticker(ticker_symbol)
+    
+    try:
+        data = yf.download(formatted_ticker, period="5d", interval="1d", progress=False)
+        
+        if data.empty or len(data) < 2:
+            return f"❌ *{ticker_symbol}* sembolü bulunamadı veya veri alınamadı."
+        
+        # Bir önceki günün mum verileri
+        prev_day = data.iloc[-2]
+        high = float(prev_day['High'])
+        low = float(prev_day['Low'])
+        close = float(prev_day['Close'])
+        
+        # Pivot Seviyeleri (Standart Pivot Yöntemi)
+        pivot = (high + low + close) / 3
+        r1 = (2 * pivot) - low
+        s1 = (2 * pivot) - high
+        r2 = pivot + (high - low)
+        s2 = pivot - (high - low)
+        
+        last_price = float(data.iloc[-1]['Close'])
+        
+        return (
+            f"📊 *{formatted_ticker} Teknik Analiz*\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💵 *Son Fiyat:* `{last_price:.2f}`\n\n"
+            f"🔴 *Direnç 2 (R2):* `{r2:.2f}`\n"
+            f"🔴 *Direnç 1 (R1):* `{r1:.2f}`\n"
+            f"🎯 *Pivot Noktası:* `{pivot:.2f}`\n"
+            f"🟢 *Destek 1 (S1):* `{s1:.2f}`\n"
+            f"🟢 *Destek 2 (S2):* `{s2:.2f}`\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"💡 *Kullanım:* BİST için `THYAO`, NASDAQ için `AAPL`, Kripto için `BTC` yazabilirsiniz."
+        )
+    except Exception as e:
+        return f"⚠️ Veri hesaplanırken hata oluştu: {str(e)}"
+
+# Telegram Komut Yöneticileri
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Merhaba! Destek ve direnç seviyelerini öğrenmek istediğiniz hisse veya kripto sembolünü yazın.\n\n"
+        "Örnek kullanım:\n"
+        "• `/analiz THYAO` (BİST)\n"
+        "• `/analiz AAPL` (NASDAQ)\n"
+        "• `/analiz BTC` (Kripto)"
+    )
+
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Lütfen bir sembol girin. Örnek: `/analiz THYAO`", parse_mode="Markdown")
+        return
+    
+    symbol = context.args[0]
+    await update.message.reply_text("⏳ Veriler çekiliyor ve hesaplanıyor...")
+    
+    result = calculate_pivot_levels(symbol)
+    await update.message.reply_text(result, parse_mode="Markdown")
+
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("analiz", analyze))
+    
+    print("Bot çalışıyor...")
+    app.run_polling()
