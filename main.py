@@ -104,4 +104,23 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling(drop_pending_updates=True)
-        
+
+import asyncio
+import httpx
+
+# Arka planda 10 dakikada bir kendi Render URL'sine istek atan fonksiyon
+async def keep_alive_self_ping():
+    # Kendi Render URL'niz
+    RENDER_URL = "https://asistan-dinm.onrender.com"
+    
+    async with httpx.AsyncClient() as client:
+        while True:
+            await asyncio.sleep(600)  # 600 saniye = 10 dakika
+            try:
+                response = await client.get(RENDER_URL)
+                print(f"Self-ping başarılı! Durum Kodu: {response.status_code}")
+            except Exception as e:
+                print(f"Self-ping hatası: {e}")
+
+# asyncio event loop içerisine eklenebilir:
+# asyncio.create_task(keep_alive_self_ping())
