@@ -1,5 +1,6 @@
 import logging
 import requests
+import yfinance as yf
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -7,72 +8,64 @@ TOKEN = "8757949960:AAHGclRKNpJvhplMWwrZg_r1PVJCEDuuyPs"
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Yaygın kripto isimlerinin Borsa Kodları eşleştirmesi
 CRYPTO_MAP = {
-    "TRON": "TRX",
-    "BITCOIN": "BTC",
-    "ETHEREUM": "ETH",
-    "RIPPLE": "XRP",
-    "DOGECOIN": "DOGE"
+    "TRON": "TRX", "BITCOIN": "BTC", "ETHEREUM": "ETH", "RIPPLE": "XRP", "DOGECOIN": "DOGE"
 }
 
-def get_crypto_binance(symbol: str):
-    """Binance API üzerinden Pivot verilerini çeker."""
+def get_crypto_data(symbol: str):
+    clean = symbol.upper().strip()
+    clean = CRYPTO_MAP.get(clean, clean).replace("-USD", "").replace(".IS", "")
+    
+    # 1. Yöntem: Binance API
     try:
-        clean_symbol = symbol.upper().strip()
-        clean_symbol = CRYPTO_MAP.get(clean_symbol, clean_symbol).replace("-USD", "").replace(".IS", "")
-        
-        url = f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}USDT&interval=1d&limit=3"
+        url = f"https://api.binance.com/api/v3/klines?symbol={clean}USDT&interval=1d&limit=3"
         res = requests.get(url, timeout=5)
         data = res.json()
-        
         if isinstance(data, list) and len(data) >= 2:
             prev_day = data[-2]
-            high = float(prev_day[2])
-            low = float(prev_day[3])
-            close = float(prev_day[4])
-            last_price = float(data[-1][4])
-            return high, low, close, last_price, f"{clean_symbol}-USD"
+            return float(prev_day[2]), float(prev_day[3]), float(prev_day[4]), float(data[-1][4]), f"{clean}-USD"
     except Exception as e:
-        logging.error(f"Binance Hata: {e}")
+        logging.error(f"Binance API Hata: {e}")
+
+    # 2. Yöntem: Yahoo Finance (Yedek Kripto)
+    try:
+        ticker = yf.Ticker(f"{clean}-USD")
+        df = ticker.history(period="5d")
+        if len(df) >= 2:
+            prev_day = df.iloc[-2]
+            last_day = df.iloc[-1]
+            return float(prev_day['High']), float(prev_day['Low']), float(prev_day['Close']), float(last_day['Close']), f"{clean}-USD"
+    except Exception as e:
+        logging.error(f"Yahoo Crypto Hata: {e}")
+        
     return None
 
-def get_stock_stooq(symbol: str):
-    """Stooq API üzerinden BİST/NASDAQ verilerini çeker."""
+def get_bist_data(symbol: str):
+    clean = symbol.upper().replace(".IS", "").replace("-USD", "").strip()
+    
+    # Yahoo Finance (BİST Hisseleri)
     try:
-        clean_symbol = symbol.upper().replace(".IS", "").replace("-USD", "").strip()
-        formatted = f"{clean_symbol}.TR"
-        
-        url = f"https://stooq.com/q/l/?s={formatted}&f=sdohcv&h&e=csv"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        res = requests.get(url, headers=headers, timeout=5)
-        
-        lines = res.text.strip().split('\n')
-        if len(lines) >= 2:
-            row = lines[1].split(',')
-            if len(row) >= 6 and row[1] != 'N/A':
-                high = float(row[3])
-                low = float(row[4])
-                close = float(row[5])
-                return high, low, close, close, f"{clean_symbol}.IS"
+        ticker = yf.Ticker(f"{clean}.IS")
+        df = ticker.history(period="5d")
+        if len(df) >= 2:
+            prev_day = df.iloc[-2]
+            last_day = df.iloc[-1]
+            return float(prev_day['High']), float(prev_day['Low']), float(prev_day['Close']), float(last_day['Close']), f"{clean}.IS"
     except Exception as e:
-        logging.error(f"Stooq Hata: {e}")
+        logging.error(f"Yahoo BIST Hata: {e}")
+
     return None
 
 def calculate_pivot_levels(symbol: str):
-    # 1. Kripto olarak dene
-    data = get_crypto_binance(symbol)
-    
-    # 2. Kripto değilse BİST/Hisse olarak dene
+    data = get_crypto_data(symbol)
     if not data:
-        data = get_stock_stooq(symbol)
+        data = get_bist_data(symbol)
         
     if not data:
-        return f"❌ *{symbol.upper()}* sembolü bulunamadı.\n💡 *Örnekler:* `THYAO`, `ASELS`, `ASTOR`, `BTC`, `TRX`"
+        return f"❌ *{symbol.upper()}* sembolü bulunamadı veya verisine ulaşılamadı.\n💡 *Örnekler:* `THYAO`, `ASELS`, `ASTOR`, `BTC`, `TRX`"
         
     high, low, close, last_price, ticker_name = data
     
-    # Standart Pivot Seviyeleri
     pivot = (high + low + close) / 3
     r1 = (2 * pivot) - low
     s1 = (2 * pivot) - high
@@ -110,3 +103,4 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling(drop_pending_updates=True)
+        
