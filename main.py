@@ -3,6 +3,8 @@ import requests
 import yfinance as yf
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import httpx
+import feedparser
 
 TOKEN = "8757949960:AAHGclRKNpJvhplMWwrZg_r1PVJCEDuuyPs"
 
@@ -104,3 +106,86 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling(drop_pending_updates=True)
         
+# ---------------------------------------------------------
+# Sadece KAP Haberlerini Çeken Fonksiyon
+# ---------------------------------------------------------
+async def get_company_kap_news(ticker_symbol: str, limit: int = 5):
+    """
+    Belirtilen hisse koduna ait son KAP haberlerini süzüp getirir.
+    """
+    news_list = []
+    symbol = ticker_symbol.upper()
+    rss_url = "https://www.kap.org.tr/tr/rss"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(rss_url)
+            
+        if response.status_code == 200:
+            feed = feedparser.parse(response.text)
+            
+            for entry in feed.entries:
+                title = entry.get("title", "")
+                summary = entry.get("summary", "")
+                
+                # Başlıkta veya özet metninde hisse kodu geçiyorsa ekle
+                if symbol in title or symbol in summary:
+                    news_list.append({
+                        "title": title,
+                        "link": entry.get("link", "#")
+                    })
+                
+                if len(news_list) >= limit:
+                    break
+    except Exception as e:
+        print(f"KAP haber çekme hatası: {e}")
+
+    return news_list
+
+
+# ---------------------------------------------------------
+# Telegram Komut Yakalayıcısı (/kap THYAO)
+# ---------------------------------------------------------
+async def kap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Kullanıcı sadece /kap yazdıysa uyar
+    if not context.args:
+        await update.message.reply_text("⚠️ Lütfen haberlerini görmek istediğiniz hisse kodunu girin.\n\n**Örnek:** `/kap THYAO`", parse_mode="Markdown")
+        return
+
+    ticker = context.args[0].upper()
+    await update.message.reply_text(f"⏳ **{ticker}** için son KAP haberleri getiriliyor...")
+
+    # Sadece haberleri çek
+    kap_news = await get_company_kap_news(ticker, limit=5)
+
+    if not kap_news:
+        await update.message.reply_text(f"ℹ️ **{ticker}** için son zamanlarda yayınlanmış yeni bir KAP haberi bulunamadı.")
+        return
+
+    # Sadece haber listesinden oluşan mesajı hazırla
+    message = f"📢 **{ticker} SON KAP HABERLERİ**\n"
+    message += f"───────────────\n\n"
+
+    for idx, news in enumerate(kap_news, start=1):
+        message += f"{idx}. [{news['title']}]({news['link']})\n\n"
+
+    await update.message.reply_text(
+        message, 
+        parse_mode="Markdown", 
+        disable_web_page_preview=True
+    )
+
+
+# ---------------------------------------------------------
+# Bot Bağlantısı
+# ---------------------------------------------------------
+if __name__ == "__main__":
+    BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    # Komut tanımlaması (/kap)
+    app.add_handler(CommandHandler("kap", kap_command))
+
+    print("KAP Bot çalışıyor...")
+    app.run_polling()
