@@ -106,6 +106,7 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling(drop_pending_updates=True)
         
+
 # ---------------------------------------------------------
 # Sadece KAP Haberlerini Çeken Fonksiyon
 # ---------------------------------------------------------
@@ -175,12 +176,11 @@ async def kap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
-
 # ---------------------------------------------------------
 # Bot Bağlantısı
 # ---------------------------------------------------------
 if __name__ == "__main__":
-    BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+    BOT_TOKEN = "8757949960:AAHGclRKNpJvhplMWwrZg_r1PVJCEDuuyPs"
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
